@@ -56,7 +56,7 @@ BET_LEVELS = [1, 2, 4, 6, 8, 10, 15, 20, 25, 50, 100]
 
 # Free spins-konfiguration
 N_FREE_SPINS = 10
-FS_BUY_MULT = 130       # kostar 135x bet att köpa FS
+FS_BUY_MULT = 130       # kostar 130x bet att köpa FS
 MAX_WIN_MULT = 5000.0   # cap per bonus i bet-multiplar
 
 # Fördelning för antal wild reels per FS
