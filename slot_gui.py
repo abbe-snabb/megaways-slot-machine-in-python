@@ -1,6 +1,7 @@
 import pygame
 import sys
 import random
+import os  # NYTT
 
 # Importera din matematiska modell
 from slot_math import (
@@ -95,6 +96,9 @@ FS_AUTO_SPIN_DELAY_WIN_MS = 2000  # justera efter smak
 # Overlay-tid för retrigger-meddelande
 RETRIGGER_OVERLAY_DURATION_MS = 2200
 
+# Wild-drop: hur länge mellan varje rad (W → WI → WIL → WILD)
+WILD_DROP_STEP_MS = 200  # 0.2 s per rad
+
 # Spin-timing
 SPIN_FIRST_STOP_MS = 800      # första hjulet stannar efter 0.8 s
 SPIN_REEL_STEP_MS = 300       # nästa hjul 0.3 s senare osv
@@ -105,37 +109,67 @@ SPIN_SYMBOLS = [s for s in SYMBOLS if s != "S"]
 
 # ------------------- ASSET-LOADING (PNG-stöd) -------------------
 
-ASSET_DIR = "assets"  # ändra om du vill ha annan path
+# Rotmapp för assets relativt denna fil
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ASSET_DIR = os.path.join(BASE_DIR, "assets")
+
+# Debug: skriv ut vad som finns i assets
+try:
+    print("ASSET_DIR:", ASSET_DIR)
+    print("Filer i assets:", os.listdir(ASSET_DIR))
+except Exception as e:
+    print("Kunde inte läsa assets-mappen:", e)
 
 
-def load_image(path, scale_to=None):
+def load_image(filename, scale_to=None):
+    full_path = os.path.join(ASSET_DIR, filename)
     try:
-        img = pygame.image.load(path).convert_alpha()
+        img = pygame.image.load(full_path)
+
+        # Bara convert_alpha om ett display-fönster redan är skapat
+        if pygame.display.get_surface() is not None:
+            img = img.convert_alpha()
+
         if scale_to is not None:
             img = pygame.transform.smoothscale(img, scale_to)
+
         return img
-    except Exception:
+    except Exception as e:
+        print(f"[VARNING] kunde inte ladda {full_path}: {e}")
         return None
 
 
 # Bakgrunder (om du vill använda egna PNG:er)
-BG_BASE_IMG = load_image(f"{ASSET_DIR}/bg_base.png", (WINDOW_WIDTH, WINDOW_HEIGHT))
-BG_FS_IMG = load_image(f"{ASSET_DIR}/bg_fs.png", (WINDOW_WIDTH, WINDOW_HEIGHT))
+BG_BASE_IMG = load_image("bg_base.png", (WINDOW_WIDTH, WINDOW_HEIGHT))
+BG_FS_IMG   = load_image("bg_fs.png",  (WINDOW_WIDTH, WINDOW_HEIGHT))
 
-# Spin-knapps grafik (rund knapp)
-SPIN_BUTTON_IMG = load_image(f"{ASSET_DIR}/spin_button.png", (140, 140))
-SPIN_BUTTON_IMG_DISABLED = load_image(f"{ASSET_DIR}/spin_button_disabled.png", (140, 140))
+SPIN_BUTTON_IMG          = load_image("spin_button.png", (140, 140))
+SPIN_BUTTON_IMG_DISABLED = load_image("spin_button_disabled.png", (140, 140))
 
-# Bonusköps-knapp (rektangel)
-BUY_BUTTON_IMG = load_image(f"{ASSET_DIR}/buy_button.png", (180, 70))
-BUY_BUTTON_IMG_DISABLED = load_image(f"{ASSET_DIR}/buy_button_disabled.png", (180, 70))
+BUY_BUTTON_IMG           = load_image("buy_button.png", (180, 70))
+BUY_BUTTON_IMG_DISABLED  = load_image("buy_button_disabled.png", (180, 70))
+
+# --- bet +/- knappar ---
+BET_MINUS_IMG           = load_image("bet_minus.png", (60, 50))
+BET_MINUS_IMG_DISABLED  = load_image("bet_minus_disabled.png", (60, 50))
+BET_PLUS_IMG            = load_image("bet_plus.png", (60, 50))
+BET_PLUS_IMG_DISABLED   = load_image("bet_plus_disabled.png", (60, 50))
 
 # Symbolbilder – t.ex. assets/symbol_A.png osv
+ALL_SYMBOL_FILES = [
+    "A", "B", "C", "D", "E", "F", "G", "H", "I", "S",
+    "W1", "W2", "W3", "W4",
+]
+
 SYMBOL_IMAGES = {}
-for sym in SYMBOLS + ["W"]:
-    img = load_image(f"{ASSET_DIR}/symbol_{sym}.png", (CELL_SIZE - 20, CELL_SIZE - 20))
+
+for sym in ALL_SYMBOL_FILES:
+    img = load_image(f"symbol_{sym}.png", (CELL_SIZE - 20, CELL_SIZE - 20))
     if img is not None:
         SYMBOL_IMAGES[sym] = img
+    else:
+        print(f"[VARNING] Hittade inte PNG: symbol_{sym}.png")
+
 
 # ------------------- HJÄLPFUNKTIONER -------------------
 
@@ -175,8 +209,10 @@ def draw_round_button(surface, center, radius, text, font, color,
         pygame.draw.circle(surface, base_col, center, radius)
         pygame.draw.circle(surface, WHITE, center, radius, width=3)
 
-    txt_col = BLACK if not disabled else (180, 180, 180)
-    draw_text(surface, text, cx, cy, font, txt_col, center=True)
+    # Text på spin-knappen döljs eftersom PNG:en har grafiken
+    # (om du vill ha text ovanpå, avkommentera)
+    # txt_col = BLACK if not disabled else (180, 180, 180)
+    # draw_text(surface, text, cx, cy, font, txt_col, center=True)
 
 
 def draw_button(surface, rect, text, font, color,
@@ -196,7 +232,9 @@ def draw_button(surface, rect, text, font, color,
         pygame.draw.rect(surface, WHITE, rect, width=2, border_radius=14)
         txt_col = BLACK if not disabled else (180, 180, 180)
 
-    draw_text(surface, text, rect.centerx, rect.centery - 1, font, txt_col, center=True)
+    # för +/- och buy använder vi tom text, PNG:en har symbolen
+    if text:
+        draw_text(surface, text, rect.centerx, rect.centery - 1, font, txt_col, center=True)
 
 
 def find_winning_positions(grid, paytable, wild_reels=None):
@@ -248,14 +286,14 @@ def find_winning_positions(grid, paytable, wild_reels=None):
 
 
 def draw_grid(surface, grid, font, win_positions=None, time_ms=0,
-              wild_reels=None, fs_mults=None):
+              wild_reels=None, fs_mults=None, wild_rows_visible=None):
     """
     Ritar grid med symboler.
     - win_positions blinkar feint
     - wild_reels (kolumner) markeras
-    - wild-reels visas som W / W-bild (underliggande symboler syns aldrig)
+    - wild-reels visas som W / I / L / D-ikon, med drop-animation:
+      wild_rows_visible[c] = antal rader (1–4) som ska visas i kolumn c
     - om fs_mults finns: "xN" visas över respektive wild-reel
-      fs_mults: dict {reel_index: mult}
     """
     if grid is None:
         return
@@ -263,6 +301,7 @@ def draw_grid(surface, grid, font, win_positions=None, time_ms=0,
     win_positions = win_positions or set()
     wild_reels = set(wild_reels or [])
     fs_mults = fs_mults or {}
+    wild_rows_visible = wild_rows_visible or {}
 
     blink_phase = (time_ms // 200) % 2  # 0 eller 1
 
@@ -272,8 +311,12 @@ def draw_grid(surface, grid, font, win_positions=None, time_ms=0,
             y = GRID_Y + r * CELL_SIZE
             cell_rect = pygame.Rect(x, y, CELL_SIZE, CELL_SIZE)
 
+            # Hur många wild-rader är aktiva i denna kolumn?
+            rows_visible = wild_rows_visible.get(c, None)
+            is_wild_col = (rows_visible is not None and c in wild_reels)
+
             # Bakgrund
-            if c in wild_reels:
+            if is_wild_col:
                 base_bg = (30, 50, 90)
             else:
                 base_bg = DARK_GREY
@@ -291,32 +334,47 @@ def draw_grid(surface, grid, font, win_positions=None, time_ms=0,
                 surface.blit(overlay, (x, y))
 
             # Kant
-            border_color = CYAN if c in wild_reels else BLACK
+            border_color = CYAN if is_wild_col else BLACK
             pygame.draw.rect(surface, border_color, cell_rect, width=2, border_radius=16)
 
             # Symbol / wild-symbol
-            if c in wild_reels:
-                sym_key = "W"
+            sym_key = None
+
+            if is_wild_col:
+                # Bestäm vilken bokstav som ska visas på denna rad, givet hur många rader är aktiva
+                if rows_visible >= 1 and r == 0:
+                    sym_key = "W1"
+                elif rows_visible >= 2 and r == 1:
+                    sym_key = "W2"
+                elif rows_visible >= 3 and r == 2:
+                    sym_key = "W3"
+                elif rows_visible >= 4 and r == 3:
+                    sym_key = "W4"
+                else:
+                    sym_key = None  # denna rad har inte "droppat" än → ingen symbol
             else:
                 sym_key = grid[r][c]
 
             inner_rect = cell_rect.inflate(-16, -16)
 
             # PNG-baserad symbol om tillgänglig
-            img = SYMBOL_IMAGES.get(sym_key)
-            if img is not None:
-                img_rect = img.get_rect(center=inner_rect.center)
-                surface.blit(img, img_rect)
-            else:
-                sym_col = SYMBOL_COLORS.get(sym_key, WHITE)
-                pygame.draw.rect(surface, sym_col, inner_rect, border_radius=12)
-                text = symbol_display(sym_key)
-                draw_text(surface, text, x + CELL_SIZE // 2, y + CELL_SIZE // 2,
-                          font, BLACK, center=True)
+            if sym_key is not None:
+                img = SYMBOL_IMAGES.get(sym_key)
+                if img is not None:
+                    img_rect = img.get_rect(center=inner_rect.center)
+                    surface.blit(img, img_rect)
+                else:
+                    sym_col = SYMBOL_COLORS.get(sym_key, WHITE)
+                    pygame.draw.rect(surface, sym_col, inner_rect, border_radius=12)
+                    text = symbol_display(sym_key)
+                    draw_text(surface, text, x + CELL_SIZE // 2, y + CELL_SIZE // 2,
+                              font, BLACK, center=True)
 
-    # Rita multipel ovanför wild-reels
+    # Rita multipel ovanför wild-reels (bara när droppen börjat)
     if wild_reels and fs_mults:
         for c in wild_reels:
+            if c not in wild_rows_visible:
+                continue
             if c in fs_mults:
                 cx = GRID_X + c * CELL_SIZE + CELL_SIZE // 2
                 cy = GRID_Y - 22
@@ -347,7 +405,6 @@ def main():
     retrigger_overlay_until = 0
     retrigger_overlay_text = ""
 
-
     # animation / spin
     is_spinning = False
     spin_start_time = 0
@@ -367,6 +424,10 @@ def main():
     current_wild_reels = []
     current_wild_mults = {}     # {reel_index: mult}
 
+    # wild drop state (för bonus-wild-reels)
+    wild_drop_start_times = {}   # {reel_index: start_time_ms}
+    wild_drop_done_reels = set() # reels som har full WILD (4 rader)
+
     # bonus state:
     # "none"            – inget pågående
     # "ready_to_start"  – bonus triggad, vänta på klick för att starta autospins
@@ -379,10 +440,6 @@ def main():
 
     # bonus slut-info
     last_bonus_total = 0.0
-
-    # big win
-    big_win_active = False
-    big_win_end_time = 0
 
     message = ""
 
@@ -454,6 +511,8 @@ def main():
                     fs_total_mult = 0.0
                     current_wild_reels = []
                     current_wild_mults = {}
+                    wild_drop_start_times = {}
+                    wild_drop_done_reels = set()
                     message = ""
                     continue
 
@@ -485,6 +544,8 @@ def main():
                         fs_total_mult = 0.0
                         current_wild_reels = []
                         current_wild_mults = {}
+                        wild_drop_start_times = {}
+                        wild_drop_done_reels = set()
                         last_win_positions = set()
                         message = f"Köpte free spins för {cost:.2f}"
                         bonus_state = "ready_to_start"
@@ -513,6 +574,12 @@ def main():
                             last_win = 0.0
                             last_win_positions = set()
                             message = ""
+
+                            # base game: inga wild-reels
+                            current_wild_reels = []
+                            current_wild_mults = {}
+                            wild_drop_start_times = {}
+                            wild_drop_done_reels = set()
 
                             # initiera spin-animationsgrid
                             spin_anim_grid = [
@@ -561,6 +628,10 @@ def main():
                         m = random.choices(FS_MULTIPLIERS, weights=FS_MULT_WEIGHTS, k=1)[0]
                         current_wild_mults[r] = m
 
+                # reset wild-drop state för detta spin
+                wild_drop_start_times = {}
+                wild_drop_done_reels = set()
+
                 last_win = 0.0
                 last_win_positions = set()
                 message = ""
@@ -587,151 +658,171 @@ def main():
                             spin_anim_grid[r][c] = final_grid[r][c]
                 last_spin_anim_update = now
 
-            # kolla om alla hjul har stannat
-            if all(now >= t for t in reel_stop_times) and not spin_result_applied:
-                # spin är färdig – applicera resultat
-                is_spinning = False
-                spin_result_applied = True
-                current_grid = final_grid
+            # Uppdatera wild-drop state under snurr (endast i FS)
+            if game_mode == "fs" and current_wild_reels:
+                for c in current_wild_reels:
+                    # wild-droppen får inte börja förrän hjulet faktiskt stannat
+                    if now >= reel_stop_times[c]:
+                        if c not in wild_drop_start_times:
+                            wild_drop_start_times[c] = now
+                        t = now - wild_drop_start_times[c]
+                        if t >= 4 * WILD_DROP_STEP_MS:
+                            wild_drop_done_reels.add(c)
 
-                # ev. avsluta big win overlay från tidigare spin
-                if big_win_active and now >= big_win_end_time:
-                    big_win_active = False
+            # kolla om alla hjul har stannat, och om vi FÅR applicera resultatet
+            if all(now >= t for t in reel_stop_times):
+                can_apply = False
+                if not current_wild_reels or game_mode != "fs":
+                    # Inga wild-reels (eller inte i bonus) → kan applicera direkt
+                    can_apply = True
+                else:
+                    # I bonus: vänta tills alla wild-reels är färdigdroppade
+                    if all(c in wild_drop_done_reels for c in current_wild_reels):
+                        can_apply = True
 
-                if game_mode == "base":
-                    # base game win
-                    base_mult = evaluate_megaways_win(current_grid, paytable)
-                    win_amount = base_mult * bet
-                    balance += win_amount
-                    last_win = win_amount
-                    last_win_positions = find_winning_positions(
-                        current_grid, paytable
-                    )
+                if can_apply and not spin_result_applied:
+                    # spin är färdig – applicera resultat
+                    is_spinning = False
+                    spin_result_applied = True
+                    current_grid = final_grid
 
-                    # big win?
-                    if win_amount >= BIG_WIN_THRESHOLD_MULT * bet:
-                        big_win_active = True
-                        big_win_end_time = now + BIG_WIN_DURATION_MS
+                    # ev. avsluta big win overlay från tidigare spin
+                    if big_win_active and now >= big_win_end_time:
+                        big_win_active = False
 
-                    # kolla scatter-trigger
-                    scatter_count = sum(
-                        1
-                        for row in current_grid
-                        for sym in row
-                        if sym == "S"
-                    )
+                    if game_mode == "base":
+                        # base game win
+                        base_mult = evaluate_megaways_win(current_grid, paytable)
+                        win_amount = base_mult * bet
+                        balance += win_amount
+                        last_win = win_amount
+                        last_win_positions = find_winning_positions(
+                            current_grid, paytable
+                        )
 
-                    if scatter_count == 3:
-                        # starta bonus-läge, men autostarta inte
-                        game_mode = "fs"
-                        fs_spins_left = N_FREE_SPINS
-                        fs_total_win = 0.0
-                        fs_total_mult = 0.0
-                        current_wild_reels = []
-                        current_wild_mults = {}
-                        last_win_positions = set()
-                        message = "FREE SPINS triggat!"
-                        bonus_state = "ready_to_start"
-                        fs_next_spin_time = None
-                    else:
-                        if win_amount > 0:
-                            message = f"Vinst: {win_amount:.2f}"
+                        # big win?
+                        if win_amount >= BIG_WIN_THRESHOLD_MULT * bet:
+                            big_win_active = True
+                            big_win_end_time = now + BIG_WIN_DURATION_MS
+
+                        # kolla scatter-trigger
+                        scatter_count = sum(
+                            1
+                            for row in current_grid
+                            for sym in row
+                            if sym == "S"
+                        )
+
+                        if scatter_count == 3:
+                            # starta bonus-läge, men autostarta inte
+                            game_mode = "fs"
+                            fs_spins_left = N_FREE_SPINS
+                            fs_total_win = 0.0
+                            fs_total_mult = 0.0
+                            current_wild_reels = []
+                            current_wild_mults = {}
+                            wild_drop_start_times = {}
+                            wild_drop_done_reels = set()
+                            last_win_positions = set()
+                            message = "FREE SPINS triggat!"
+                            bonus_state = "ready_to_start"
+                            fs_next_spin_time = None
                         else:
-                            # skriv inget vid nollvinst
-                            message = ""
+                            if win_amount > 0:
+                                message = f"Vinst: {win_amount:.2f}"
+                            else:
+                                # skriv inget vid nollvinst
+                                message = ""
 
-                elif game_mode == "fs":
-                    # free spins-win – använder current_wild_reels och current_wild_mults
-                    base_mult = evaluate_megaways_win(
-                        current_grid, paytable, wild_reels=current_wild_reels
-                    )
+                    elif game_mode == "fs":
+                        # free spins-win – använder current_wild_reels och current_wild_mults
+                        base_mult = evaluate_megaways_win(
+                            current_grid, paytable, wild_reels=current_wild_reels
+                        )
 
-                    if current_wild_mults:
-                        spin_mult_factor = sum(current_wild_mults.values())
-                    else:
-                        spin_mult_factor = 1
+                        if current_wild_mults:
+                            spin_mult_factor = sum(current_wild_mults.values())
+                        else:
+                            spin_mult_factor = 1
 
-                    spin_mult = base_mult * spin_mult_factor
+                        spin_mult = base_mult * spin_mult_factor
 
-                    # max win-cappning i multiplar
-                    remaining = MAX_WIN_MULT - fs_total_mult
-                    if remaining < 0:
-                        remaining = 0
-                    if spin_mult > remaining:
-                        spin_mult = remaining
+                        # max win-cappning i multiplar
+                        remaining = MAX_WIN_MULT - fs_total_mult
+                        if remaining < 0:
+                            remaining = 0
+                        if spin_mult > remaining:
+                            spin_mult = remaining
 
-                    fs_total_mult += spin_mult
-                    spin_win = spin_mult * bet
-                    fs_total_win += spin_win
-                    balance += spin_win
-                    last_win = spin_win
+                        fs_total_mult += spin_mult
+                        spin_win = spin_mult * bet
+                        fs_total_win += spin_win
+                        balance += spin_win
+                        last_win = spin_win
 
-                    last_win_positions = find_winning_positions(
-                        current_grid, paytable, wild_reels=current_wild_reels
-                    )
+                        last_win_positions = find_winning_positions(
+                            current_grid, paytable, wild_reels=current_wild_reels
+                        )
 
-                    # big win i bonus?
-                    if spin_win >= BIG_WIN_THRESHOLD_MULT * bet:
-                        big_win_active = True
-                        big_win_end_time = now + BIG_WIN_DURATION_MS
+                        # big win i bonus?
+                        if spin_win >= BIG_WIN_THRESHOLD_MULT * bet:
+                            big_win_active = True
+                            big_win_end_time = now + BIG_WIN_DURATION_MS
 
-                    # --- RETRIGGERS I BONUSEN: 2 eller 3 scatters ger extra spins ---
-                    #  men scatters under wild-reels får INTE räknas
-                    scatter_count_nonwild = 0
-                    for r in range(len(current_grid)):
-                        for c in range(len(current_grid[0])):
-                            if c in current_wild_reels:
-                                continue
-                            if current_grid[r][c] == "S":
-                                scatter_count_nonwild += 1
+                        # --- RETRIGGERS I BONUSEN: 2 eller 3 scatters ger extra spins ---
+                        #  men scatters under wild-reels får INTE räknas
+                        scatter_count_nonwild = 0
+                        for r in range(len(current_grid)):
+                            for c in range(len(current_grid[0])):
+                                if c in current_wild_reels:
+                                    continue
+                                if current_grid[r][c] == "S":
+                                    scatter_count_nonwild += 1
 
-                    extra_spins = 0
-                    if scatter_count_nonwild == 2:
-                        extra_spins = 1
-                    elif scatter_count_nonwild == 3:
-                        extra_spins = 3
+                        extra_spins = 0
+                        if scatter_count_nonwild == 2:
+                            extra_spins = 1
+                        elif scatter_count_nonwild == 3:
+                            extra_spins = 3
 
-                    # förbrukar ett spin
-                    fs_spins_left -= 1
-                    # lägg till extra + retrigger-overlay
-                    if extra_spins > 0:
-                        fs_spins_left += extra_spins
-                        retrigger_overlay_text = f"RETRIGGER! +{extra_spins} SPINS"
-                        retrigger_overlay_until = now + RETRIGGER_OVERLAY_DURATION_MS
-
-
-                    # kolla om bonusen är slut
-                    if fs_spins_left <= 0 or fs_total_mult >= MAX_WIN_MULT:
-                        last_bonus_total = fs_total_win
-                        message = f"FREE SPINS över! Total: {fs_total_win:.2f}"
-                        bonus_state = "finished_waiting"
-                        # vi stannar kvar i game_mode="fs" tills spelaren klickar vidare
-                        fs_next_spin_time = None
-                    else:
+                        # förbrukar ett spin
+                        fs_spins_left -= 1
+                        # lägg till extra + retrigger-overlay
                         if extra_spins > 0:
-                            message = (
-                                f"FS vinst: {spin_win:.2f} | +{extra_spins} extra spins! "
-                                f"FS total: {fs_total_win:.2f} | "
-                                f"Spins kvar: {fs_spins_left}"
-                            )
+                            fs_spins_left += extra_spins
+                            retrigger_overlay_text = f"RETRIGGER! +{extra_spins} SPINS"
+                            retrigger_overlay_until = now + RETRIGGER_OVERLAY_DURATION_MS
+
+                        # kolla om bonusen är slut
+                        if fs_spins_left <= 0 or fs_total_mult >= MAX_WIN_MULT:
+                            last_bonus_total = fs_total_win
+                            message = f"FREE SPINS över! Total: {fs_total_win:.2f}"
+                            bonus_state = "finished_waiting"
+                            # vi stannar kvar i game_mode="fs" tills spelaren klickar vidare
+                            fs_next_spin_time = None
                         else:
-                            message = (
-                                f"FS vinst: {spin_win:.2f} | "
-                                f"FS total: {fs_total_win:.2f} | "
-                                f"Spins kvar: {fs_spins_left}"
-                            )
+                            if extra_spins > 0:
+                                message = (
+                                    f"FS vinst: {spin_win:.2f} | +{extra_spins} extra spins! "
+                                    f"FS total: {fs_total_win:.2f} | "
+                                    f"Spins kvar: {fs_spins_left}"
+                                )
+                            else:
+                                message = (
+                                    f"FS vinst: {spin_win:.2f} | "
+                                    f"FS total: {fs_total_win:.2f} | "
+                                    f"Spins kvar: {fs_spins_left}"
+                                )
 
-                    # planera nästa autospin (om bonusen fortsätter att vara running)
-                    if bonus_state == "running":
-                        # längre paus om spinnet vann något ELLER retriggade,
-                        # så både vinst-blink och retrigger-overlay hinner synas
-                        if spin_win > 0 or extra_spins > 0:
-                            delay = FS_AUTO_SPIN_DELAY_WIN_MS
-                        else:
-                            delay = FS_AUTO_SPIN_DELAY_MS
-                        fs_next_spin_time = now + delay
-
-
+                        # planera nästa autospin (om bonusen fortsätter att vara running)
+                        if bonus_state == "running":
+                            # längre paus om spinnet vann något ELLER retriggade,
+                            # så både vinst-blink och retrigger-overlay hinner synas
+                            if spin_win > 0 or extra_spins > 0:
+                                delay = FS_AUTO_SPIN_DELAY_WIN_MS
+                            else:
+                                delay = FS_AUTO_SPIN_DELAY_MS
+                            fs_next_spin_time = now + delay
 
         # ------------- RITNING -------------
         # Bakgrund – PNG om finns, annars färg
@@ -794,8 +885,30 @@ def main():
                         ORANGE,
                     )
 
-        # Grid
+        # Beräkna hur många wild-rader som är synliga per kolumn (för animation)
         now_ms = pygame.time.get_ticks()
+        wild_rows_visible = {}
+        if game_mode == "fs" and current_wild_reels:
+            for c in current_wild_reels:
+                # Droppen får börja först när den reelen faktiskt har stannat
+                if is_spinning and now_ms < reel_stop_times[c]:
+                    continue
+
+                # sätt starttid om inte redan
+                if c not in wild_drop_start_times:
+                    wild_drop_start_times[c] = now_ms
+                    t = 0
+                else:
+                    t = now_ms - wild_drop_start_times[c]
+
+                steps = int(t // WILD_DROP_STEP_MS)
+                rows_visible = max(0, min(4, steps + 1))
+                if rows_visible > 0:
+                    wild_rows_visible[c] = rows_visible
+                if rows_visible >= 4:
+                    wild_drop_done_reels.add(c)
+
+        # Grid
         if is_spinning and spin_anim_grid is not None:
             draw_grid(
                 screen,
@@ -805,6 +918,7 @@ def main():
                 time_ms=now_ms,
                 wild_reels=current_wild_reels if game_mode == "fs" and bonus_state == "running" else None,
                 fs_mults=current_wild_mults if game_mode == "fs" and bonus_state == "running" else None,
+                wild_rows_visible=wild_rows_visible if bonus_state == "running" else None,
             )
         else:
             draw_grid(
@@ -815,6 +929,7 @@ def main():
                 time_ms=now_ms,
                 wild_reels=current_wild_reels if game_mode == "fs" and bonus_state == "running" else None,
                 fs_mults=current_wild_mults if game_mode == "fs" and bonus_state == "running" else None,
+                wild_rows_visible=wild_rows_visible if bonus_state == "running" else None,
             )
 
         # Bet-belopp ovanför spin-knappen
@@ -828,12 +943,27 @@ def main():
                                 or is_spinning
                                 or bonus_state != "none")
         draw_button(
-            screen, bet_minus_rect, "-", FONT_LARGE, RED,
-            hover_minus, disabled=bet_buttons_disabled
+            screen,
+            bet_minus_rect,
+            "",                      # ingen text, PNG:en har symbolen
+            FONT_LARGE,
+            RED,
+            hover_minus,
+            disabled=bet_buttons_disabled,
+            img=BET_MINUS_IMG,
+            img_disabled=BET_MINUS_IMG_DISABLED,
         )
+
         draw_button(
-            screen, bet_plus_rect, "+", FONT_LARGE, GREEN,
-            hover_plus, disabled=bet_buttons_disabled
+            screen,
+            bet_plus_rect,
+            "",                      # ingen text, PNG:en har symbolen
+            FONT_LARGE,
+            GREEN,
+            hover_plus,
+            disabled=bet_buttons_disabled,
+            img=BET_PLUS_IMG,
+            img_disabled=BET_PLUS_IMG_DISABLED,
         )
 
         # SPIN-knapp (rund, nere till höger)
@@ -865,7 +995,7 @@ def main():
         draw_button(
             screen,
             buy_button_rect,
-            f"Köp FS ({FS_BUY_MULT}x)",
+            "",
             FONT_SMALL,
             YELLOW,
             hover_buy,
@@ -917,7 +1047,7 @@ def main():
                       FONT_LARGE, WHITE, center=True)
             draw_text(screen, "Klicka för att fortsätta", WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 60,
                       FONT_MEDIUM, GREY, center=True)
-        
+
         # Retrigger-overlay (tidsbaserad, bara när bonusen kör)
         if bonus_state == "running" and now < retrigger_overlay_until:
             overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
