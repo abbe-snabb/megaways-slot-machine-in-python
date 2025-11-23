@@ -24,7 +24,7 @@ base_probs = {
     "I": 0.18,
 }
 
-pS = 0.013            
+pS = 0.013
 scale = 1.0 - pS        # så att A–I skalar ned och totalen blir 1.0
 
 symbol_probs = {s: p * scale for s, p in base_probs.items()}
@@ -43,8 +43,6 @@ paytable = {
     ("C", 4): 3.5,
     ("C", 5): 5,
 
-
-
     ("D", 3): 0.4,
     ("D", 4): 0.6,
     ("D", 5): 1.5,
@@ -53,8 +51,6 @@ paytable = {
     ("E", 4): 0.6,
     ("E", 5): 1.5,
 
-
-
     ("F", 3): 0.25,
     ("F", 4): 0.4,
     ("F", 5): 1,
@@ -62,8 +58,6 @@ paytable = {
     ("G", 3): 0.25,
     ("G", 4): 0.4,
     ("G", 5): 1,
-
-
 
     ("H", 4): 0.1,
     ("H", 5): 0.4,
@@ -200,11 +194,11 @@ def theoretical_rtp(symbol_probs, paytable, visible_rows=VISIBLE_ROWS):
 
 # fördelning för antal wild reels per free spin
 WILD_REEL_COUNTS = [0, 1, 2, 3, 4, 5]
-WILD_REEL_COUNT_WEIGHTS = [60, 34, 5, 0.89, 0.1, 0.01]  # procent-vikter
+WILD_REEL_COUNT_WEIGHTS = [64, 30, 5, 0.89, 0.1, 0.01]  # procent-vikter
 
 # multiplikator-fördelning per free spin
 FS_MULTIPLIERS = [1, 2, 5, 8]
-FS_MULT_WEIGHTS = [62, 30, 5 , 3]
+FS_MULT_WEIGHTS = [66, 28, 4, 2]
 
 
 def sample_wild_reels():
@@ -217,37 +211,56 @@ def sample_wild_reels():
         return []
     k = min(k, NUM_REELS)
     # välj k distinkta reelser
-    # range(NUM_REELS) = [0,1,2,3,4]
     return random.sample(range(NUM_REELS), k)
 
 
 def run_free_spins(num_free_spins, bet, verbose=True, max_win_mult=None):
     """
     Kör en free-spins-runda:
-    - varje spin: slumpa antal wild reels + vilka hjul + multiplikator
+    - startar med num_free_spins
+    - 2 scatters i bonus => +1 extra spin
+    - 3 scatters i bonus => +3 extra spins
+    - varje spin: slumpa wild reels + multiplikator
     - beräkna line win med wild reels och multiplikator
-    - totalen returneras i pengar (inte multipel)
     - om max_win_mult sätts (t.ex. 5000), capsas vinstmultipeln där
       och bonusen avslutas direkt.
     """
-    total_win_mult = 0.0  # vinst i bet-multiplar
+    total_win_mult = 0.0     # vinst i bet-multiplar
+    spins_played = 0
+    total_spins = num_free_spins
 
-    for i in range(num_free_spins):
+    while spins_played < total_spins:
+        spins_played += 1
+
         # välj wild reels
         wild_reels = sample_wild_reels()
 
         # välj multiplikator per free spin
         mult = random.choices(FS_MULTIPLIERS, weights=FS_MULT_WEIGHTS, k=1)[0]
 
+        # i bonusen får S förekomma igen (för retriggers)
         grid = spin_grid_same_probs()
 
         base_mult = evaluate_megaways_win(grid, paytable, wild_reels=wild_reels)
         spin_mult = base_mult * mult
-
         total_win_mult += spin_mult
 
+        # räkna scatters i free spin → extra spins
+        scatter_count = sum(sym == "S" for row in grid for sym in row)
+        extra_spins = 0
+        if scatter_count == 2:
+            extra_spins = 1
+        elif scatter_count == 3:
+            extra_spins = 3
+
+        if extra_spins > 0:
+            total_spins += extra_spins
+            if verbose:
+                print(f"--> {scatter_count} scatters i bonus! +{extra_spins} extra free spin(s).")
+                print(f"    Nya totalt antal free spins: {total_spins}")
+
         if verbose:
-            print(f"\nFree Spin {i+1}/{num_free_spins} | Wild reels: {[r+1 for r in wild_reels]} | Mult: {mult}x")
+            print(f"\nFree Spin {spins_played}/{total_spins} | Wild reels: {[r+1 for r in wild_reels]} | Mult: {mult}x")
             print_grid_with_wilds(grid, wild_reels)
             print(f"Free spin vinstmultipel (före mult): {base_mult:.2f}x")
             print(f"Free spin vinstmultipel (efter mult): {spin_mult:.2f}x")
@@ -268,7 +281,6 @@ def run_free_spins(num_free_spins, bet, verbose=True, max_win_mult=None):
     return total_win_amount
 
 
-
 def estimate_fs_round_ev(num_free_spins=10, n_rounds=200_000, bet=1.0, max_win_mult=None):
     total = 0.0
     for _ in range(n_rounds):
@@ -277,7 +289,6 @@ def estimate_fs_round_ev(num_free_spins=10, n_rounds=200_000, bet=1.0, max_win_m
                                 verbose=False,
                                 max_win_mult=max_win_mult)
     return total / n_rounds
-
 
 
 def simulate_rtp(paytable, n_spins=1_000_000, bet=1.0):
@@ -303,7 +314,6 @@ def simulate_rtp(paytable, n_spins=1_000_000, bet=1.0):
             fs_triggers += 1
             fs_win = run_free_spins(num_free_spins=10, bet=bet, verbose=False, max_win_mult=5000)
             total_win += fs_win
-
 
     avg_win = total_win / (n_spins * bet)  # RTP per satsad 1
     hit_freq = hit_count / n_spins
@@ -395,7 +405,6 @@ def play_game():
             total_win += fs_win
             print(f"Saldo efter free spins: {balance:.2f}")
 
-
         if balance <= 0:
             print("Saldo är 0. Spelet är slut.")
             break
@@ -415,13 +424,12 @@ def theoretical_total_rtp_with_fs(symbol_probs, paytable, visible_rows=VISIBLE_R
     """
     Teoretisk total-RTP:
     - base game (exakt analytiskt)
-    - free spins (EV uppskattad via simulering av free-spins-rundor,
-      men med exakt samma logik som spelet använder: 0–5 wild reels + multipliers)
+    - free spins (EV uppskattad via simulering av free-spins-rundor)
     """
     # 1) Base-RTP analytiskt
     rtp_base = theoretical_rtp(symbol_probs, paytable, visible_rows=visible_rows)
 
-    # 2) Trigger-sannolikhet q = P(exakt 3 S) (Binomial(20,pS))
+    # 2) Trigger-sannolikhet q = P(exakt 3 S) (Binomial(20,pS)) – approx pga truncation
     pS_local = symbol_probs.get("S", 0.0)
     cells = visible_rows * NUM_REELS  # 4 * 5 = 20
     q_trig = comb(cells, 3) * (pS_local**3) * ((1 - pS_local)**(cells - 3))
@@ -429,9 +437,9 @@ def theoretical_total_rtp_with_fs(symbol_probs, paytable, visible_rows=VISIBLE_R
     # 3) EV per free-spins-runda (10 FS) via riktad simulering
     N_FS = 10
     EV_fs_round = estimate_fs_round_ev(num_free_spins=N_FS,
-                                   n_rounds=20_000,
-                                   bet=1.0,
-                                   max_win_mult=5000)
+                                       n_rounds=20_000,
+                                       bet=1.0,
+                                       max_win_mult=5000)
 
     # 4) RTP-bidrag från free spins per base spin
     rtp_fs = q_trig * EV_fs_round  # bet=1 => denna är i RTP-enheter
@@ -488,7 +496,6 @@ def simulate_variance(paytable, n_spins=200_000, bet=1.0):
         scatter_count = sum(sym == "S" for row in grid for sym in row)
         if scatter_count == 3:
             win += run_free_spins(num_free_spins=10, bet=bet, verbose=False, max_win_mult=5000)
-
 
         wins.append(win)
 

@@ -56,7 +56,7 @@ BET_LEVELS = [1, 2, 4, 6, 8, 10, 15, 20, 25, 50, 100]
 
 # Free spins-konfiguration
 N_FREE_SPINS = 10
-FS_BUY_MULT = 135       # kostar 135x bet att köpa FS
+FS_BUY_MULT = 130       # kostar 135x bet att köpa FS
 MAX_WIN_MULT = 5000.0   # cap per bonus i bet-multiplar
 
 # Fördelning för antal wild reels per FS
@@ -184,8 +184,6 @@ def draw_grid(surface, grid, font, win_positions=None, time_ms=0, wild_reels=Non
                 else:
                     overlay_col = (255, 255, 255, 20)
 
-                # eftersom pygame inte har alfa i draw.rect direkt,
-                # fuskar vi med en semi-transparent surface
                 overlay = pygame.Surface((CELL_SIZE, CELL_SIZE), pygame.SRCALPHA)
                 overlay.fill(overlay_col)
                 surface.blit(overlay, (x, y))
@@ -350,7 +348,6 @@ def main():
                             final_grid = spin_grid_same_probs()
 
                             # bestäm wild reels + multiplikator för detta FS-spin
-                            # (samma logik som i math-filen)
                             k = random.choices(
                                 WILD_REEL_COUNTS, weights=WILD_REEL_COUNT_WEIGHTS, k=1
                             )[0]
@@ -367,8 +364,6 @@ def main():
                             last_win = 0.0
                             last_win_positions = set()
                             message = ""
-
-            # (event loop slut)
 
         # ------------- SPINLOGIK -------------
         if is_spinning:
@@ -439,20 +434,46 @@ def main():
                         current_grid, paytable, wild_reels=current_wild_reels
                     )
 
-                    fs_spins_left -= 1
+                    # --- RETRIGGERS I BONUSEN: 2 eller 3 scatters ger extra spins ---
+                    scatter_count = sum(
+                        1
+                        for row in current_grid
+                        for sym in row
+                        if sym == "S"
+                    )
 
+                    extra_spins = 0
+                    if scatter_count == 2:
+                        extra_spins = 1
+                    elif scatter_count == 3:
+                        extra_spins = 3
+
+                    # vi förbrukar ett spin…
+                    fs_spins_left -= 1
+                    # …men lägger till extra om det blev retrigger
+                    if extra_spins > 0:
+                        fs_spins_left += extra_spins
+
+                    # kolla om bonusen är slut
                     if fs_spins_left <= 0 or fs_total_mult >= MAX_WIN_MULT:
-                        # avsluta bonus
                         message = f"FREE SPINS över! Total: {fs_total_win:.2f}"
                         game_mode = "base"
                         free_spins_active = False
                         current_wild_reels = []
                     else:
-                        message = (
-                            f"FS vinst: {spin_win:.2f} | "
-                            f"FS total: {fs_total_win:.2f} | "
-                            f"Spins kvar: {fs_spins_left}"
-                        )
+                        # skriv ett bra meddelande beroende på om vi retriggat
+                        if extra_spins > 0:
+                            message = (
+                                f"FS vinst: {spin_win:.2f} | +{extra_spins} extra spins! "
+                                f"FS total: {fs_total_win:.2f} | "
+                                f"Spins kvar: {fs_spins_left}"
+                            )
+                        else:
+                            message = (
+                                f"FS vinst: {spin_win:.2f} | "
+                                f"FS total: {fs_total_win:.2f} | "
+                                f"Spins kvar: {fs_spins_left}"
+                            )
 
         # ------------- RITNING -------------
         screen.fill(BG_FS if game_mode == "fs" else BG_BASE)
