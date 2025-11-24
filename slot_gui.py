@@ -532,7 +532,7 @@ def draw_grid(surface, grid, font, win_positions=None, time_ms=0,
 
 
 def main():
-    screen = pygame.display.set_mode((BASE_WIDTH, BASE_HEIGHT), pygame.RESIZABLE)
+    screen = pygame.display.set_mode((BASE_WIDTH, BASE_HEIGHT)) #screen = pygame.display.set_mode((BASE_WIDTH, BASE_HEIGHT), pygame.RESIZABLE)
     pygame.display.set_caption("Megaways Slot – GUI")
 
     game_surface = pygame.Surface((BASE_WIDTH, BASE_HEIGHT))
@@ -1428,7 +1428,7 @@ def main():
         pygame.display.flip()
 
     pygame.quit()
-    sys.exit()
+    #sys.exit()
 
 
 if __name__ == "__main__":
