@@ -1,3 +1,5 @@
 import slot_gui
 
-slot_gui.main()
+if __name__ == "__main__":
+    slot_gui.main()
+
