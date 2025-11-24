@@ -12,7 +12,7 @@
 python -m pip install pygame-ce pygbag
 
 # every time you want to rebuild the web version:
-python -m pygbag --build slot_gui.py
+python -m pygbag --build .
 mkdir -p docs
 cp -r build/web/* docs/
 git add .
