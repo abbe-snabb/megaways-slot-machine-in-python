@@ -5,6 +5,7 @@
 5. Free spins kvar ska gå ner en siffra direkt ner spinnet startar, inte efter spinnet är klart!
 6. "s_scatter_hit.wav" should play when the symbol shows, right now it plays after all the reels have stopped.
 7. något fortfarande konstigt med wildreel på reel 5. Den beter sig konstigt.
+8. spara inte skärmen från fs till när man går tillbaka till base game. Det ska bara vara en random grid, dvs inte det sista spinnet från fs.
 
 
 

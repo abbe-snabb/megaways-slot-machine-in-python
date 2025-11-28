@@ -225,7 +225,7 @@ SYMBOL_COLORS = {
 
 # Big win
 BIG_WIN_THRESHOLD_MULT = 30.0  # 30x bet
-BIG_WIN_DURATION_MS = 4200     # 4.2 sek
+BIG_WIN_DURATION_MS = 6000     # 6 sek
 
 # FS transition (scatter trigger) timings
 SCATTER_FLASH_DURATION_MS = 1500   # scatters blinkar
@@ -287,7 +287,7 @@ SND_SPIN_START      = load_sound("s_spin_start.wav",      0.7) #fixed
 SND_REEL_STOP       = load_sound("s_reel_stop.wav",       0.45) #fixed
 SND_BUTTON_CLICK    = load_sound("s_button_click.wav",    0.5) #dont need
 SND_WIN_SMALL       = load_sound("s_win_small.wav",       0.5) #fixed
-SND_WIN_BIG         = load_sound("s_win_big.wav",         0.8)
+SND_WIN_BIG         = load_sound("s_win_big.wav",         0.8) #fixed
 SND_SCATTER_HIT     = load_sound("s_scatter_hit.wav",     0.8) #fixed but needs change
 SND_FS_TRIGGER      = load_sound("s_fs_trigger.wav",      0.9)
 SND_RETRIGGER       = load_sound("s_retrigger.wav",       0.9)
