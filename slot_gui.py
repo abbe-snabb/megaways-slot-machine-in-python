@@ -23,6 +23,7 @@ from slot_math import (
     FS_MULT_WEIGHTS,
 )
 
+pygame.mixer.pre_init(44100, -16, 2, 512)  # <-- NYTT: bättre latency
 pygame.init()
 
 # ------------------- KONFIG / KONSTANTER -------------------
@@ -257,6 +258,8 @@ PAYTABLE_BTN_RADIUS = 26  # liten "info"-cirkel uppe till vänster
 
 # ------------------- ASSET-LOADING (PNG-stöd) -------------------
 
+
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSET_DIR = os.path.join(BASE_DIR, "assets")
 
@@ -265,6 +268,52 @@ try:
     print("Filer i assets:", os.listdir(ASSET_DIR))
 except Exception as e:
     print("Kunde inte läsa assets-mappen:", e)
+
+
+# ------------------- LJUD -------------------  # <-- NYTT
+
+def load_sound(filename, volume=1.0):
+    full_path = os.path.join(ASSET_DIR, filename)
+    try:
+        s = pygame.mixer.Sound(full_path)
+        s.set_volume(volume)
+        return s
+    except Exception as e:
+        print(f"[VARNING] kunde inte ladda ljud {full_path}: {e}")
+        return None
+
+# Effekter – byt filnamn till dina riktiga
+SND_SPIN_START      = load_sound("s_spin_start.wav",      0.7)
+SND_REEL_STOP       = load_sound("s_reel_stop.wav",       0.5)
+SND_BUTTON_CLICK    = load_sound("s_button_click.wav",    0.5)
+SND_WIN_SMALL       = load_sound("s_win_small.wav",       0.7)
+SND_WIN_BIG         = load_sound("s_win_big.wav",         0.8)
+SND_SCATTER_HIT     = load_sound("s_scatter_hit.wav",     0.8)
+SND_FS_TRIGGER      = load_sound("s_fs_trigger.wav",      0.9)
+SND_RETRIGGER       = load_sound("s_retrigger.wav",       0.9)
+SND_BONUS_END       = load_sound("s_bonus_end.wav",       0.8)
+
+# Musik – vi använder pygame.mixer.music för loopad bakgrundsmusik
+def play_music(mode):
+    """
+    mode: 'base' eller 'fs'
+    Laddar och loopar rätt musik. Fungerar även om fil saknas.
+    """
+    try:
+        if mode == "base":
+            music_file = os.path.join(ASSET_DIR, "music_base.wav")
+        else:
+            music_file = os.path.join(ASSET_DIR, "music_fs.wav")
+
+        if not os.path.exists(music_file):
+            print(f"[INFO] ingen musikfil hittades: {music_file}")
+            return
+
+        pygame.mixer.music.load(music_file)
+        pygame.mixer.music.set_volume(0.4)
+        pygame.mixer.music.play(-1)
+    except Exception as e:
+        print(f"[VARNING] kunde inte spela musik ({mode}): {e}")
 
 
 def load_image(filename, scale_to=None):
@@ -1087,6 +1136,12 @@ def main():
     render_scale = 1.0
     render_offset = (0, 0)
 
+    # Ljud / musik state                                  # <-- NYTT
+    reel_stop_played = [False] * GRID_COLS               # per-hjul-stoppljud
+    current_music_mode = "base"
+    play_music("base")  # starta bas-låten om fil finns
+
+
     # ---------- Spelstatus ----------
     paytable_visible = False
     paytable_mode = "paytable"          # <-- NY (växlar PAYTABLE/INFO)
@@ -1252,6 +1307,9 @@ def main():
                             bonus_state = "running"
                             fs_next_spin_time = now + FS_AUTO_SPIN_DELAY_MS
                             pending_fs_from_scatter = False
+                            if current_music_mode != "fs":         # <-- NYTT
+                                current_music_mode = "fs"
+                                play_music("fs")
                     continue
 
                 # Klick under BONUS OVER-transition
@@ -1386,7 +1444,7 @@ def main():
                         if balance < bet:
                             message = "För lite saldo för att spinna."
                         else:
-                            spin_held = True      # <-- NY
+                            spin_held = True
                             balance -= bet
                             is_spinning = True
                             spin_result_applied = False
@@ -1395,17 +1453,10 @@ def main():
                                 spin_start_time + SPIN_FIRST_STOP_MS + SPIN_REEL_STEP_MS * i
                                 for i in range(GRID_COLS)
                             ]
-                            final_grid = spin_grid_same_probs()
-                            last_win = 0.0
-                            last_win_positions = set()
-                            wild_drop_start_times = {}
-                            message = ""
+                            reel_stop_played = [False] * GRID_COLS      # <-- NYTT
+                            if SND_SPIN_START:
+                                SND_SPIN_START.play()
 
-                            spin_anim_grid = [
-                                [random.choice(SPIN_SYMBOLS) for _ in range(GRID_COLS)]
-                                for _ in range(GRID_ROWS)
-                            ]
-                            last_spin_anim_update = now
 
 
             elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
@@ -1432,6 +1483,9 @@ def main():
                     spin_start_time + SPIN_FIRST_STOP_MS + SPIN_REEL_STEP_MS * i
                     for i in range(GRID_COLS)
                 ]
+                reel_stop_played = [False] * GRID_COLS      # <-- NYTT
+                if SND_SPIN_START:
+                    SND_SPIN_START.play()
                 final_grid = spin_grid_same_probs()
 
                 k = random.choices(
@@ -1462,6 +1516,12 @@ def main():
 
         # ---------- SPINLOGIK ----------
         if is_spinning:
+            # Spela stoppljud per hjul                        # <-- NYTT
+            for c in range(GRID_COLS):
+                if not reel_stop_played[c] and now >= reel_stop_times[c]:
+                    if SND_REEL_STOP:
+                        SND_REEL_STOP.play()
+                    reel_stop_played[c] = True
             if spin_anim_grid is not None and now - last_spin_anim_update >= SPIN_SYMBOL_CHANGE_MS:
                 for r in range(GRID_ROWS):
                     for c in range(GRID_COLS):
@@ -1497,6 +1557,14 @@ def main():
                     balance += win_amount
                     last_win = win_amount
 
+                    if win_amount > 0:
+                        if win_amount >= BIG_WIN_THRESHOLD_MULT * bet:
+                            if SND_WIN_BIG:
+                                SND_WIN_BIG.play()          # <-- NYTT
+                        else:
+                            if SND_WIN_SMALL:
+                                SND_WIN_SMALL.play()        # <-- NYTT
+
                     if forced_scatter_spin:
                         last_win_positions = set()
                     else:
@@ -1514,6 +1582,9 @@ def main():
                         for sym in row
                         if sym == "S"
                     )
+
+                    if scatter_count > 0 and SND_SCATTER_HIT:
+                        SND_SCATTER_HIT.play()          # <-- NYTT (minst 1 scatter)
 
                     if scatter_count == 3:
                         fs_spins_left = N_FREE_SPINS
@@ -1570,8 +1641,15 @@ def main():
                     fs_total_win += spin_win
                     balance += spin_win
                     last_win = spin_win
-                    fs_last_spin_win = spin_win  # NY: denna spinnen i bonusen
+                    fs_last_spin_win = spin_win
 
+                    if spin_win > 0:
+                        if spin_win >= BIG_WIN_THRESHOLD_MULT * bet:
+                            if SND_WIN_BIG:
+                                SND_WIN_BIG.play()
+                        else:
+                            if SND_WIN_SMALL:
+                                SND_WIN_SMALL.play()
                     last_win_positions = find_winning_positions(
                         current_grid, paytable, wild_reels=current_wild_reels
                     )
@@ -1599,6 +1677,8 @@ def main():
                         fs_spins_left += extra_spins
                         retrigger_overlay_text = f"RETRIGGER! +{extra_spins} SPINS"
                         retrigger_overlay_until = now + RETRIGGER_OVERLAY_DURATION_MS
+                        if SND_RETRIGGER:
+                            SND_RETRIGGER.play()        # <-- NYTT
 
                     if fs_spins_left <= 0 or fs_total_mult >= MAX_WIN_MULT:
                         last_bonus_total = fs_total_win
@@ -1609,6 +1689,8 @@ def main():
                         end_fs_transition_active = True
                         end_fs_transition_phase = "fade_in"
                         end_fs_transition_start = now
+                        if SND_BONUS_END:
+                            SND_BONUS_END.play()        # <-- NYTT
                     else:
                         if extra_spins > 0:
                             message = (
@@ -2196,22 +2278,77 @@ def main():
             overlay.fill((0, 0, 0, 200))
             surface.blit(overlay, (0, 0))
 
+            # --- Dynamisk storlek beroende på språk/text ---  <-- NYTT
+            title_text = TEXT[current_language]["BUY_TITLE"]
+            question_text = TEXT[current_language]["BUY_QUESTION"].format(cost=buy_confirm_cost)
+
+            title_w, title_h = FONT_LARGE.size(title_text)
+            q_w, q_h = FONT_MEDIUM.size(question_text)
+
+            padding_x = 80
+            padding_y_top = 40
+            padding_y_bottom = 40
+            spacing_title_question = 30
+            spacing_question_buttons = 60
+
+            button_width, button_height = 130, 50
+            button_spacing = 40
+            buttons_total_width = 2 * button_width + button_spacing
+
+            # bredden måste rymma titel, fråga OCH knappar
+            content_width = max(title_w, q_w, buttons_total_width)
+            confirm_width = max(500, content_width + 2 * padding_x)
+
+            confirm_height = (
+                padding_y_top
+                + title_h
+                + spacing_title_question
+                + q_h
+                + spacing_question_buttons
+                + button_height
+                + padding_y_bottom
+            )
+
+            # uppdatera rektangeln centrerat på skärmen
+            confirm_rect.width = confirm_width
+            confirm_rect.height = confirm_height
+            confirm_rect.x = (WINDOW_WIDTH - confirm_width) // 2
+            confirm_rect.y = (WINDOW_HEIGHT - confirm_height) // 2
+
+            # knapparna längst ned i panelen
+            buttons_y = confirm_rect.bottom - padding_y_bottom - button_height
+            buttons_start_x = confirm_rect.centerx - buttons_total_width // 2
+
+            confirm_yes_rect = pygame.Rect(
+                buttons_start_x,
+                buttons_y,
+                button_width,
+                button_height,
+            )
+            confirm_no_rect = pygame.Rect(
+                buttons_start_x + button_width + button_spacing,
+                buttons_y,
+                button_width,
+                button_height,
+            )
+
+            # --- Rita panelen ---
             pygame.draw.rect(surface, (30, 30, 60), confirm_rect, border_radius=16)
             pygame.draw.rect(surface, YELLOW, confirm_rect, width=3, border_radius=16)
 
-            draw_text(surface, TEXT[current_language]["BUY_TITLE"],
-                      confirm_rect.centerx, confirm_rect.top + 40,
+            # Titel
+            title_y = confirm_rect.top + padding_y_top
+            draw_text(surface, title_text,
+                      confirm_rect.centerx, title_y,
                       FONT_LARGE, YELLOW, center=True)
-            draw_text(
-                surface,
-                TEXT[current_language]["BUY_QUESTION"].format(cost=buy_confirm_cost),
-                confirm_rect.centerx,
-                confirm_rect.top + 100,
-                FONT_MEDIUM,
-                WHITE,
-                center=True,
-            )
 
+            # Frågetexten under titeln
+            question_y = title_y + title_h + spacing_title_question
+            draw_text(surface, question_text,
+                      confirm_rect.centerx, question_y,
+                      FONT_MEDIUM, WHITE, center=True)
+
+            # Hover på knappar (med nya rektar)
             yes_hover = confirm_yes_rect.collidepoint(mouse_pos)
             no_hover = confirm_no_rect.collidepoint(mouse_pos)
 
@@ -2268,7 +2405,8 @@ def main():
                     sub_surf.set_alpha(alpha)
                     sub_rect = sub_surf.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 40))
                     surface.blit(sub_surf, sub_rect)
-
+        # RITA FOREGROUND-PARTIKLAR ALLRA SIST (ovanför grid, knappar, osv.)
+        update_and_draw_fg_particles(surface)
         if end_fs_transition_active:
             elapsed_end = now - end_fs_transition_start
             alpha_end = 0
@@ -2297,6 +2435,9 @@ def main():
                     current_wild_mults = {}
                     wild_drop_start_times = {}
                     message = ""
+                    if current_music_mode != "base":        # <-- NYTT
+                        current_music_mode = "base"
+                        play_music("base")                    
 
             if alpha_end > 0:
                 overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
@@ -2323,6 +2464,9 @@ def main():
                 hint_rect = hint_surf.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 60))
                 surface.blit(hint_surf, hint_rect)
 
+
+
+
         if big_win_active:
             if now >= big_win_end_time:
                 big_win_active = False
@@ -2339,9 +2483,7 @@ def main():
                           big_font, YELLOW, center=True)
 
                 draw_text(surface, f"{last_win:.2f}", WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 20,
-                          FONT_LARGE, WHITE, center=True)
-        # RITA FOREGROUND-PARTIKLAR ALLRA SIST (ovanför grid, knappar, osv.)
-        update_and_draw_fg_particles(surface)
+                          FONT_LARGE, WHITE, center=True)        
         # ---------- SKALA TILL FÖNSTRET ----------
         window_w, window_h = screen.get_size()
 
