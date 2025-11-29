@@ -5,11 +5,6 @@ import os  # för assets-path
 import math  # <-- NY
 import asyncio
 
-
-
-
-
-
 # Importera din matematiska modell
 from slot_math import (
     SYMBOLS,
@@ -29,7 +24,6 @@ pygame.mixer.pre_init(44100, -16, 2, 512)  # <-- NYTT: bättre latency
 pygame.init()
 
 # ------------------- KONFIG / KONSTANTER -------------------
-
 # Bas-upplösning (intern koordinatsystem)
 BASE_WIDTH = 1600
 BASE_HEIGHT = 1000
@@ -44,7 +38,6 @@ GRID_COLS = NUM_REELS
 GRID_ROWS = VISIBLE_ROWS
 GRID_WIDTH = GRID_COLS * CELL_SIZE
 GRID_HEIGHT = GRID_ROWS * CELL_SIZE
-
 GRID_X = (WINDOW_WIDTH - GRID_WIDTH) // 2
 GRID_Y = (WINDOW_HEIGHT - GRID_HEIGHT) // 2 + 10
 # Färger (fallback om inga PNGs finns)
@@ -228,40 +221,38 @@ SYMBOL_COLORS = {
 # Big win
 BIG_WIN_THRESHOLD_MULT = 30.0  # 30x bet
 BIG_WIN_DURATION_MS = 6000     # 6 sek
-
 # FS transition (scatter trigger) timings
 SCATTER_FLASH_DURATION_MS = 1500   # scatters blinkar
 FS_FADEOUT_DURATION_MS = 1000      # används som duration både för fade in och fade out
-
 # Autospin delay i FS
 FS_AUTO_SPIN_DELAY_MS = 1100
-
 # Extra delay efter en vinnande / retriggad FS
 FS_AUTO_SPIN_DELAY_WIN_MS = 2000
-
 # Overlay-tid för retrigger-meddelande
 RETRIGGER_OVERLAY_DURATION_MS = 2200
-
 # Spin-timing
 SPIN_FIRST_STOP_MS = 900
 SPIN_REEL_STEP_MS = 450
 SPIN_SYMBOL_CHANGE_MS = 40 # <-- CHANGED: smoother reel updates
-
 # Wild-reel drop-animation
 WILD_DROP_STEP_MS = 300
-
 # Symboler som används för spinn-animation (ingen scatter)
 SPIN_SYMBOLS = [s for s in SYMBOLS if s != "S"]
-
 # Bonus-slut-transition (FS -> base)
 END_FS_FADE_DURATION_MS = 1000
-
 PAYTABLE_BTN_RADIUS = 26  # liten "info"-cirkel uppe till vänster
 
+# ------------------- LJUDVOLYM -------------------
+MASTER_VOLUME = 1.0           # global master om du vill (kan lämnas som 1.0)
+MUSIC_BASE_VOLUME = 0.2       # bas–nivå för musik
+MUSIC_VOLUME = 1.0            # styrs av MUSIC–slidern (0–1)
+SFX_VOLUME = 1.0              # styrs av SFX–slidern (0–1)
+music_duck_factor = 1.0       # 1.0 normalt, 0.5 vid big win-duck
+
+# Lista av (sound_objekt, base_volume)
+ALL_SOUNDS = []
+
 # ------------------- ASSET-LOADING (PNG-stöd) -------------------
-
-
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSET_DIR = os.path.join(BASE_DIR, "assets")
 
@@ -273,16 +264,38 @@ except Exception as e:
 
 
 # ------------------- LJUD -------------------  # <-- NYTT
-
-def load_sound(filename, volume=1.0):
+def load_sound(filename, base_volume=1.0):
     full_path = os.path.join(ASSET_DIR, filename)
     try:
         s = pygame.mixer.Sound(full_path)
-        s.set_volume(volume)
+        # spara både objektet och dess "grundvolym"
+        ALL_SOUNDS.append((s, base_volume))
+        # initial volym: bas * SFX_VOLUME * MASTER_VOLUME
+        s.set_volume(base_volume * SFX_VOLUME * MASTER_VOLUME)
         return s
     except Exception as e:
         print(f"[VARNING] kunde inte ladda ljud {full_path}: {e}")
         return None
+
+
+
+def update_global_volume():
+    """Anropa när MUSIC_VOLUME / SFX_VOLUME / MASTER_VOLUME eller duck-factor ändras."""
+
+    # --- SFX ---
+    for s, base in ALL_SOUNDS:
+        try:
+            s.set_volume(base * SFX_VOLUME * MASTER_VOLUME)
+        except Exception:
+            pass
+
+    # --- Musik ---
+    try:
+        pygame.mixer.music.set_volume(
+            MUSIC_BASE_VOLUME * MUSIC_VOLUME * MASTER_VOLUME * music_duck_factor
+        )
+    except Exception:
+        pass
 
 # Effekter – byt filnamn till dina riktiga
 SND_SPIN_START      = load_sound("s_spin_start.wav",      0.7) #fixed
@@ -300,22 +313,24 @@ def play_music(mode):
     mode: 'base' eller 'fs'
     Laddar och loopar rätt musik. Fungerar även om fil saknas.
     """
+    global music_duck_factor
     try:
         if mode == "base":
-            music_file = os.path.join(ASSET_DIR, "music_base.wav") #fixed
+            music_file = os.path.join(ASSET_DIR, "music_base.wav")
         else:
-            music_file = os.path.join(ASSET_DIR, "music_fs.wav") #fixed
+            music_file = os.path.join(ASSET_DIR, "music_fs.wav")
 
         if not os.path.exists(music_file):
             print(f"[INFO] ingen musikfil hittades: {music_file}")
             return
 
         pygame.mixer.music.load(music_file)
-        pygame.mixer.music.set_volume(0.2)
+        pygame.mixer.music.set_volume(
+            MUSIC_BASE_VOLUME * MUSIC_VOLUME * MASTER_VOLUME * music_duck_factor
+        )
         pygame.mixer.music.play(-1)
     except Exception as e:
         print(f"[VARNING] kunde inte spela musik ({mode}): {e}")
-
 
 def load_image(filename, scale_to=None):
     full_path = os.path.join(ASSET_DIR, filename)
@@ -356,7 +371,6 @@ def draw_bonus_logo_electric(surface):
 
     depth_vec = (2, 2)
     depth_len = 8
-
 
     def smoothstep(t: float) -> float:
         # 3t^2 - 2t^3
@@ -463,7 +477,6 @@ def draw_bonus_logo_electric(surface):
 
         x_cursor += w + letter_spacing
 
-
 def draw_logo_mixtape_megaways(surface):
 
     center_x = GRID_X + GRID_WIDTH // 2
@@ -503,7 +516,6 @@ def draw_logo_mixtape_megaways(surface):
         result.blit(grad, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
         return result
 
-
     # ----------- 3D FÖR HELA YTAN (inkl outline!) --------------
     def extrude_3d(surface, img, cx, cy):
         for i in range(depth_len, 0, -1):
@@ -512,8 +524,7 @@ def draw_logo_mixtape_megaways(surface):
             rect = img.get_rect(center=(cx + dx, cy + dy))
             surface.blit(img, rect)
 
-
-    # ============ MEGAWAYS ==============
+    # ============= MEGAWAYS ==============
     def draw_3d_flat(text, font, cx, cy, top_col, bot_col):
 
         base_white = font.render(text, True, (255, 255, 255))
@@ -539,7 +550,6 @@ def draw_logo_mixtape_megaways(surface):
 
         # ---- FRÄMRE LAGRET ----
         surface.blit(outline_surf, outline_surf.get_rect(center=(cx, cy)))
-
 
     # ============ MIXTAPE ==============
     def draw_char_on_arc(ch, font, center, radius, angle, top_col, bot_col):
@@ -579,7 +589,6 @@ def draw_logo_mixtape_megaways(surface):
 
 
     # ========== BÅGEN ==========
-
     letter_spacing = -5
     widths = [mix_font.size(ch)[0] for ch in mix_text]
     total_width = sum(widths) + letter_spacing * (len(widths)-1)
@@ -601,9 +610,6 @@ def draw_logo_mixtape_megaways(surface):
     # ---- MEGAWAYS ----
     draw_3d_flat(meg_text, meg_font, center_x, meg_y, MEG_TOP, MEG_BOTTOM)
 
-
-
-
 def load_button_image(filename, max_w, max_h):
     full_path = os.path.join(ASSET_DIR, filename)
     try:
@@ -620,14 +626,12 @@ def load_button_image(filename, max_w, max_h):
         print(f"[VARNING] kunde inte ladda {full_path}: {e}")
         return None
 
-
 def load_image_any(filenames, scale_to=None):
     for name in filenames:
         img = load_image(name, scale_to)
         if img is not None:
             return img
     return None
-
 
 BG_BASE_IMG = load_image("bg_base.png", (WINDOW_WIDTH, WINDOW_HEIGHT))
 BG_FS_IMG = load_image("bg_fs.png", (WINDOW_WIDTH, WINDOW_HEIGHT))
@@ -657,7 +661,6 @@ for lang_code in LANG_SEQUENCE:   # ["sv", "en", "de", "fr", "es"]
     else:
         print(f"[VARNING] kunde inte ladda flagga: flag_{lang_code}.png")
 
-
 ALL_SYMBOL_FILES = [
     "A", "B", "C", "D", "E", "F", "G", "H", "I", "S",
     "W1", "W2", "W3", "W4",
@@ -673,8 +676,6 @@ for sym in ALL_SYMBOL_FILES:
 
 
 # ------------------- HJÄLPFUNKTIONER -------------------
-
-
 def symbol_display(sym: str) -> str:
     return DISPLAY_NAMES.get(sym, sym)
 
@@ -687,7 +688,6 @@ def draw_text(surface, text, x, y, font, color=WHITE, center=False):
     else:
         rect.topleft = (x, y)
     surface.blit(img, rect)
-
 
 def draw_round_button(surface, center, radius, text, font, color,
                       hover=False, disabled=False, pressed=False,
@@ -712,8 +712,6 @@ def draw_round_button(surface, center, radius, text, font, color,
 
         pygame.draw.circle(surface, base_col, center, radius)
         pygame.draw.circle(surface, WHITE, center, radius, width=3)
-
-
 
 def draw_button(surface, rect, text, font, color,
                 hover=False, disabled=False, img=None, img_disabled=None):
@@ -793,17 +791,10 @@ def find_winning_positions(grid, paytable, wild_reels=None):
 # ========================================================
 # PARTICLE SYSTEM – Global lists
 # ========================================================
-
 particles_logo = []
 particles_dust = []
 particles_win = []
 particles_fs_strips = []
-
-
-# ========================================================
-# LOGO SPARKS (små elektriska gnistor)
-# ========================================================
-
 
 # ========================================================
 # NEON DUST – konstant glitter i bakgrunden
@@ -820,7 +811,6 @@ def spawn_neon_dust(game_mode):
             "size": random.randint(1, 3),
             "color": color
         })
-
 
 # ========================================================
 # WIN SPARKS – liten explosion i en vinnande cell
@@ -839,19 +829,6 @@ def spawn_win_sparks(x, y):
             "color": (255, 255, 180)
         })
 
-
-# ========================================================
-# FS Neon Strips (bara i free spins)
-# ========================================================
-def draw_fs_neon_strips(surface):
-    for i in range(3):
-        y = GRID_Y - 40 - i * 20
-        alpha = 120 - i * 30
-        strip = pygame.Surface((GRID_WIDTH, 12), pygame.SRCALPHA)
-        pygame.draw.rect(strip, (120, 220, 255, alpha), (0, 0, GRID_WIDTH, 12))
-        surface.blit(strip, (GRID_X, y))
-
-
 # ========================================================
 # UPDATE + DRAW ALL PARTICLES
 # ========================================================
@@ -869,7 +846,6 @@ def update_and_draw_bg_particles(surface):       # <-- NY
         pygame.draw.circle(surface, p["color"], (int(p["x"]), int(p["y"])), p["size"])
     for p in dead:
         particles_dust.remove(p)
-
 
 def update_and_draw_fg_particles(surface):       # <-- NY
     """Ritar logo-sparks och win-sparks ovanpå grid."""
@@ -954,9 +930,7 @@ def update_and_draw_fg_particles(surface):       # <-- NY
         pygame.draw.circle(surface, p["color"], (int(p["x"]), int(p["y"])), p["size"])
     for p in dead:
         particles_win.remove(p)
-
-
-    
+  
 def draw_grid(surface, grid, font, win_positions=None, time_ms=0,
               wild_reels=None, fs_mults=None,
               wild_drop_start_times=None,
@@ -1231,8 +1205,8 @@ def draw_grid(surface, grid, font, win_positions=None, time_ms=0,
         pygame.draw.circle(surface, border_col, (cx, circle_y), circle_radius, 3)
         draw_text(surface, f"x{mult_val}", cx, circle_y, FONT_SMALL, text_col, center=True)
 
-
 async def main():
+    global MASTER_VOLUME, music_duck_factor, MUSIC_VOLUME, SFX_VOLUME
     screen = pygame.display.set_mode((BASE_WIDTH, BASE_HEIGHT)) #screen = pygame.display.set_mode((BASE_WIDTH, BASE_HEIGHT), pygame.RESIZABLE)
     pygame.display.set_caption("Megaways Slot – GUI")
 
@@ -1245,10 +1219,8 @@ async def main():
     # Ljud / musik state                                  # <-- NYTT
     reel_stop_played = [False] * GRID_COLS               # per-hjul-stoppljud
     current_music_mode = "base"
-    MUSIC_BASE_VOLUME = 0.2   # samma som i play_music
     music_ducked_for_bigwin = False
     play_music("base")  # starta bas-låten om fil finns
-
 
     # ---------- Spelstatus ----------
     paytable_visible = False
@@ -1318,7 +1290,6 @@ async def main():
     end_fs_transition_phase = None
 
     # ------------------- LAYOUT (bas-koords) -------------------
-
     spin_radius = 70
     spin_center = (WINDOW_WIDTH - 230, WINDOW_HEIGHT - 270)
     spin_button_rect = pygame.Rect(
@@ -1364,6 +1335,17 @@ async def main():
     language_button_rect = pygame.Rect(0, 0, 90, 40)     # <-- NY
     language_button_rect.center = (WINDOW_WIDTH - 90, 50)  # uppe höger  <-- NY
 
+    # --- Volym–sliders ---  (MUSIC + SFX)
+    music_slider_rect = pygame.Rect(0, 0, 260, 24)
+    music_slider_rect.center = (WINDOW_WIDTH // 2 - 550, 855)
+
+    sfx_slider_rect = pygame.Rect(0, 0, 260, 24)
+    sfx_slider_rect.center = (WINDOW_WIDTH // 2  - 550, 890)
+
+    music_slider_dragging = False
+    sfx_slider_dragging = False
+
+
     confirm_width, confirm_height = 500, 260
     confirm_rect = pygame.Rect(
         (WINDOW_WIDTH - confirm_width) // 2,
@@ -1402,13 +1384,18 @@ async def main():
 
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 wx, wy = event.pos
+
+
+
                 # BIG WIN overlay: klick stänger bara overlay, ingen annan input
                 if big_win_active:
                     big_win_active = False
                     big_win_end_time = 0
                     if music_ducked_for_bigwin:
                         try:
-                            pygame.mixer.music.set_volume(MUSIC_BASE_VOLUME)
+                            music_duck_factor = 1.0
+                            update_global_volume()
+                            music_ducked_for_bigwin = False
                         except Exception:
                             pass
                         music_ducked_for_bigwin = False
@@ -1416,6 +1403,28 @@ async def main():
                 offset_x, offset_y = render_offset
                 mx = (wx - offset_x) / render_scale
                 my = (wy - offset_y) / render_scale
+
+                # MUSIC–slider
+                if music_slider_rect.collidepoint(mx, my):
+                    music_slider_dragging = True
+                    inner_left = music_slider_rect.left + 20
+                    inner_right = music_slider_rect.right - 20
+                    if inner_right > inner_left:
+                        t = (mx - inner_left) / (inner_right - inner_left)
+                        MUSIC_VOLUME = max(0.0, min(1.0, t))
+                        update_global_volume()
+                    continue
+
+                # SFX–slider
+                if sfx_slider_rect.collidepoint(mx, my):
+                    sfx_slider_dragging = True
+                    inner_left = sfx_slider_rect.left + 20
+                    inner_right = sfx_slider_rect.right - 20
+                    if inner_right > inner_left:
+                        t = (mx - inner_left) / (inner_right - inner_left)
+                        SFX_VOLUME = max(0.0, min(1.0, t))
+                        update_global_volume()
+                    continue
 
                 # Klick under FS-trigger-transition
                 if fs_transition_active:
@@ -1516,12 +1525,11 @@ async def main():
                         paytable_visible = False
                     continue
 
-
-
                 # Language-knapp – byt språk i ordning SV -> EN -> DE -> FR -> ES  <-- NY
                 if language_button_rect.collidepoint(mx, my):
                     current_language_index = (current_language_index + 1) % len(LANG_SEQUENCE)
                     continue
+
 
                 # --- Bet-knappar (respektera min/max visuellt & logiskt) ---
                 can_change_bet = (
@@ -1598,12 +1606,37 @@ async def main():
                             if SND_SPIN_START:
                                 SND_SPIN_START.play()
 
-
-
             elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
                 bet_minus_held = False
                 bet_plus_held = False
-                spin_held = False  
+                spin_held = False
+                music_slider_dragging = False
+                sfx_slider_dragging = False
+            
+            elif event.type == pygame.MOUSEMOTION:
+                wx, wy = event.pos
+                offset_x, offset_y = render_offset
+                mx = (wx - offset_x) / render_scale
+                my = (wy - offset_y) / render_scale
+
+                # Dra MUSIC–slider
+                if music_slider_dragging:
+                    inner_left = music_slider_rect.left + 20
+                    inner_right = music_slider_rect.right - 20
+                    if inner_right > inner_left:
+                        t = (mx - inner_left) / (inner_right - inner_left)
+                        MUSIC_VOLUME = max(0.0, min(1.0, t))
+                        update_global_volume()
+
+                # Dra SFX–slider
+                if sfx_slider_dragging:
+                    inner_left = sfx_slider_rect.left + 20
+                    inner_right = sfx_slider_rect.right - 20
+                    if inner_right > inner_left:
+                        t = (mx - inner_left) / (inner_right - inner_left)
+                        SFX_VOLUME = max(0.0, min(1.0, t))
+                        update_global_volume()
+
 
         # ---------- AUTOSPIN FÖR FS ----------
         if (game_mode == "fs"
@@ -1724,7 +1757,8 @@ async def main():
                                 SND_WIN_BIG.play()
                             # ducka musiken
                             try:
-                                pygame.mixer.music.set_volume(MUSIC_BASE_VOLUME * 0.5)
+                                music_duck_factor = 0.5
+                                update_global_volume()
                                 music_ducked_for_bigwin = True
                             except Exception:
                                 pass
@@ -1749,7 +1783,6 @@ async def main():
                         for sym in row
                         if sym == "S"
                     )
-
 
                     if scatter_count == 3:
                         fs_spins_left = N_FREE_SPINS
@@ -1813,7 +1846,8 @@ async def main():
                             if SND_WIN_BIG:
                                 SND_WIN_BIG.play()
                             try:
-                                pygame.mixer.music.set_volume(MUSIC_BASE_VOLUME * 0.5)
+                                music_duck_factor = 0.5
+                                update_global_volume()
                                 music_ducked_for_bigwin = True
                             except Exception:
                                 pass
@@ -1907,21 +1941,15 @@ async def main():
         update_and_draw_bg_particles(surface)
         if game_mode == "fs":
             draw_bonus_logo_electric(surface)
-
-
-
         else:
             # Base game: logga utan partiklar
             draw_logo_mixtape_megaways(surface)
             # ingen spawn_logo_sparks här (så inget hamnar på base game-loggan)
 
-
-
         if game_mode == "fs":
             left_x = GRID_X
             base_y = GRID_Y
             if bonus_state in ("ready_to_start", "running", "finished_waiting"):
-
                 # --- Cirkel: SPINS KVAR (samma färgtema som grid) ---
                 circle_center = (left_x -140, base_y+ 70)
                 circle_radius = 65
@@ -2013,11 +2041,9 @@ async def main():
                 draw_text(surface, f"{fs_last_spin_win:.2f}", spin_rect.centerx,
                           spin_rect.bottom - 26, FONT_MEDIUM, WHITE, center=True)
 
-
         now_ms = pygame.time.get_ticks()
 
-        # Wild-reels: under spin -> använd droppande reels,
-        # efter spin -> använd hela current_wild_reels           # <-- NY / ÄNDRA
+        # Wild-reels: under spin -> använd droppande reels,  efter spin -> använd hela current_wild_reels           # <-- NY / ÄNDRA
         if game_mode == "fs" and bonus_state == "running":
             if is_spinning:
                 active_wild_reels = set(wild_drop_start_times.keys())
@@ -2057,9 +2083,6 @@ async def main():
             is_spinning=is_spinning,                             # <-- NEW
             reel_stop_times=reel_stop_times if is_spinning else None,  # <-- NEW
         )
-
-        #draw_text(surface, f"Bet: {bet:.2f}", bet_label_pos[0], bet_label_pos[1], FONT_MEDIUM, WHITE, center=True)
-
         # --- Hover i bas-koords ---
         wx, wy = pygame.mouse.get_pos()
         offset_x, offset_y = render_offset
@@ -2226,6 +2249,62 @@ async def main():
                 language_button_rect.centerx, language_button_rect.centery,
                 FONT_SMALL, WHITE, center=True
             )
+        
+        # --- Volym–sliders (MUSIC + SFX) ---
+        slider_inner_margin = 18
+
+        def draw_slider(rect, value, label):
+            # bakgrund
+            pygame.draw.rect(surface, (10, 10, 30), rect, border_radius=12)
+
+            inner = rect.inflate(-4, -4)
+            track_y = inner.centery
+
+            # grå "tom" bar
+            pygame.draw.line(
+                surface,
+                (60, 60, 80),
+                (inner.left + slider_inner_margin, track_y),
+                (inner.right - slider_inner_margin, track_y),
+                4,
+            )
+
+            # fylld del
+            inner_left = inner.left + slider_inner_margin
+            inner_right = inner.right - slider_inner_margin
+            if inner_right > inner_left:
+                filled_x = inner_left + value * (inner_right - inner_left)
+            else:
+                filled_x = inner_left
+
+            pygame.draw.line(
+                surface,
+                (100, 190, 255),
+                (inner_left, track_y),
+                (filled_x, track_y),
+                4,
+            )
+
+            # handtag
+            handle_x = filled_x
+            handle_radius = 9
+            pygame.draw.circle(surface, (210, 230, 255), (int(handle_x), track_y), handle_radius)
+            pygame.draw.circle(surface, (0, 0, 0), (int(handle_x), track_y), handle_radius, 1)
+
+            # label
+            draw_text(
+                surface,
+                label,
+                rect.left - 40,
+                rect.centery,
+                FONT_SMALL,
+                WHITE,
+                center=True,
+            )
+
+        # Rita båda
+        draw_slider(music_slider_rect, MUSIC_VOLUME, "MUSIC")
+        draw_slider(sfx_slider_rect, SFX_VOLUME, "SFX")
 
         # --- Bottom-bar i samma stil som grid-panelen ---
         bottom_margin_x = 15
@@ -2459,34 +2538,9 @@ async def main():
                 draw_text(surface, TEXT[current_language]["INFO_WILDS"],
                           center_x, info_y + 90, FONT_SMALL, GREY, center=True)
 
-            # --- Scatter info ---
-            '''
-            info_y = panel_y + panel_h - 140
-            draw_text(
-                surface,
-                "3x SCATTERS TRIGGAR FREE SPINS",
-                panel_x + 40,
-                info_y,
-                FONT_MEDIUM,
-                YELLOW
-            )
-            '''
-            # --- Max win info ---
-            '''
-            draw_text(
-                surface,
-                f"MAX WIN: {MAX_WIN_MULT:.0f}x",
-                panel_x + 40,
-                info_y + 40,
-                FONT_MEDIUM,
-                WHITE
-            )
-            '''
-
             # --- Regeltext längst ner (som på bilden) ---
             rule_line1 = TEXT[current_language]["RULE_LINE1"]
             rule_line2 = TEXT[current_language]["RULE_LINE2"]
-
 
             draw_text(
                 surface,
@@ -2575,7 +2629,6 @@ async def main():
                 button_height,
             )
 
-            # --- Rita panelen ---
             # --- Rita panelen i "glas"-stil som grid/bottombar ---
             panel_surf = pygame.Surface(confirm_rect.size, pygame.SRCALPHA)
 
@@ -2761,15 +2814,14 @@ async def main():
                 hint_rect = hint_surf.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 60))
                 surface.blit(hint_surf, hint_rect)
 
-
-
-
         if big_win_active:
             if now >= big_win_end_time:
                 big_win_active = False
                 if music_ducked_for_bigwin:
                     try:
-                        pygame.mixer.music.set_volume(MUSIC_BASE_VOLUME)
+                        music_duck_factor = 1.0
+                        update_global_volume()
+                        music_ducked_for_bigwin = False
                     except Exception:
                         pass
                     music_ducked_for_bigwin = False
@@ -2813,7 +2865,6 @@ async def main():
 
     pygame.quit()
     #sys.exit()
-
 
 if __name__ == "__main__":
     asyncio.run(main())

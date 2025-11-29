@@ -243,23 +243,59 @@ END_FS_FADE_DURATION_MS = 800
 
 PAYTABLE_BTN_RADIUS = 22
 
+# ------------------- LJUDVOLYM (SAMMA LOGIK SOM DESKTOP) -------------------
+
+MASTER_VOLUME = 1.0              # styr både musik & SFX
+MUSIC_BASE_VOLUME = 0.2          # basnivå för musik innan master/duck
+music_duck_factor = 1.0          # 1.0 normalt, 0.5 vid big win-dukning
+
+ALL_SOUNDS = []                  # alla SFX-ljud
+SOUND_BASE_VOLUMES = {}          # sound -> basvolym
+
 # ------------------- ASSETS -------------------
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSET_DIR = os.path.join(BASE_DIR, "assets")
 
 
-def load_sound(filename, volume=1.0):
+def load_sound(filename, base_volume=1.0):
+    """
+    Laddar ett ljud, sparar dess 'grundvolym' och applicerar MASTER_VOLUME.
+    """
     if not ENABLE_SOUND:
         return None
     full_path = os.path.join(ASSET_DIR, filename)
     try:
         s = pygame.mixer.Sound(full_path)
-        s.set_volume(volume)
+        SOUND_BASE_VOLUMES[s] = base_volume
+        s.set_volume(base_volume * MASTER_VOLUME)
+        ALL_SOUNDS.append(s)
         return s
     except Exception as e:
         print(f"[VARNING] kunde inte ladda ljud {full_path}: {e}")
         return None
+
+
+def update_global_volume():
+    """
+    Anropas när MASTER_VOLUME eller music_duck_factor ändras.
+    Justerar alla SFX + musikvolym.
+    """
+    if ENABLE_SOUND:
+        for s in ALL_SOUNDS:
+            try:
+                base = SOUND_BASE_VOLUMES.get(s, 1.0)
+                s.set_volume(base * MASTER_VOLUME)
+            except Exception:
+                pass
+
+    if ENABLE_MUSIC:
+        try:
+            pygame.mixer.music.set_volume(
+                MUSIC_BASE_VOLUME * MASTER_VOLUME * music_duck_factor
+            )
+        except Exception:
+            pass
 
 
 SND_SPIN_START = load_sound("s_spin_start.wav", 0.6)
@@ -284,7 +320,9 @@ def play_music(mode):
             return
 
         pygame.mixer.music.load(music_file)
-        pygame.mixer.music.set_volume(0.2)
+        pygame.mixer.music.set_volume(
+            MUSIC_BASE_VOLUME * MASTER_VOLUME * music_duck_factor
+        )
         pygame.mixer.music.play(-1)
     except Exception as e:
         print(f"[VARNING] kunde inte spela musik ({mode}): {e}")
@@ -698,6 +736,8 @@ def draw_grid(surface, grid, font, win_positions=None, time_ms=0,
 
 
 async def main():
+    global MASTER_VOLUME, music_duck_factor
+
     screen = pygame.display.set_mode((BASE_WIDTH, BASE_HEIGHT))
     pygame.display.set_caption("Megaways Slot – Web")
 
@@ -709,7 +749,6 @@ async def main():
 
     reel_stop_played = [False] * GRID_COLS
     current_music_mode = "base"
-    MUSIC_BASE_VOLUME = 0.2
     music_ducked_for_bigwin = False
     play_music("base")
 
@@ -830,6 +869,11 @@ async def main():
     paytable_close_rect = None
     info_toggle_rect = None
 
+    # --- Volym-slider (samma logik som desktop) ---
+    volume_slider_rect = pygame.Rect(0, 0, 220, 22)
+    volume_slider_rect.center = (WINDOW_WIDTH // 2 - 420, WINDOW_HEIGHT - 90)
+    volume_dragging = False
+
     running = True
     while running:
         dt = clock.tick(60)
@@ -850,7 +894,8 @@ async def main():
                     big_win_end_time = 0
                     if music_ducked_for_bigwin and ENABLE_MUSIC:
                         try:
-                            pygame.mixer.music.set_volume(MUSIC_BASE_VOLUME)
+                            music_duck_factor = 1.0
+                            update_global_volume()
                         except Exception:
                             pass
                         music_ducked_for_bigwin = False
@@ -859,6 +904,17 @@ async def main():
                 offset_x, offset_y = render_offset
                 mx = (wx - offset_x) / render_scale
                 my = (wy - offset_y) / render_scale
+
+                # --- Volym-slider klick ---
+                if volume_slider_rect.collidepoint(mx, my):
+                    volume_dragging = True
+                    slider_inner_left = volume_slider_rect.left + 20
+                    slider_inner_right = volume_slider_rect.right - 20
+                    if slider_inner_right > slider_inner_left:
+                        t = (mx - slider_inner_left) / (slider_inner_right - slider_inner_left)
+                        MASTER_VOLUME = max(0.0, min(1.0, t))
+                        update_global_volume()
+                    continue
 
                 if fs_transition_active:
                     if fs_transition_phase in ("fade_in", "waiting_click"):
@@ -1028,6 +1084,21 @@ async def main():
                 bet_minus_held = False
                 bet_plus_held = False
                 spin_held = False
+                volume_dragging = False
+
+            elif event.type == pygame.MOUSEMOTION:
+                if volume_dragging:
+                    wx, wy = event.pos
+                    offset_x, offset_y = render_offset
+                    mx = (wx - offset_x) / render_scale
+                    my = (wy - offset_y) / render_scale
+
+                    slider_inner_left = volume_slider_rect.left + 20
+                    slider_inner_right = volume_slider_rect.right - 20
+                    if slider_inner_right > slider_inner_left:
+                        t = (mx - slider_inner_left) / (slider_inner_right - slider_inner_left)
+                        MASTER_VOLUME = max(0.0, min(1.0, t))
+                        update_global_volume()
 
         # AUTOSPIN FS
         if (
@@ -1140,7 +1211,8 @@ async def main():
                                 SND_WIN_BIG.play()
                             if ENABLE_MUSIC:
                                 try:
-                                    pygame.mixer.music.set_volume(MUSIC_BASE_VOLUME * 0.5)
+                                    music_duck_factor = 0.5
+                                    update_global_volume()
                                     music_ducked_for_bigwin = True
                                 except Exception:
                                     pass
@@ -1221,7 +1293,8 @@ async def main():
                                 SND_WIN_BIG.play()
                             if ENABLE_MUSIC:
                                 try:
-                                    pygame.mixer.music.set_volume(MUSIC_BASE_VOLUME * 0.5)
+                                    music_duck_factor = 0.5
+                                    update_global_volume()
                                     music_ducked_for_bigwin = True
                                 except Exception:
                                     pass
@@ -1526,6 +1599,52 @@ async def main():
             draw_text(surface, lang_label,
                       language_button_rect.centerx, language_button_rect.centery,
                       FONT_SMALL, WHITE, center=True)
+
+        # --- Volym-slider UI ---
+        slider_inner_margin = 18
+        pygame.draw.rect(surface, (10, 10, 30), volume_slider_rect, border_radius=10)
+        inner = volume_slider_rect.inflate(-4, -4)
+        track_y = inner.centery
+
+        # Tom grå bar
+        pygame.draw.line(
+            surface,
+            (60, 60, 80),
+            (inner.left + slider_inner_margin, track_y),
+            (inner.right - slider_inner_margin, track_y),
+            4,
+        )
+
+        slider_inner_left = inner.left + slider_inner_margin
+        slider_inner_right = inner.right - slider_inner_margin
+        if slider_inner_right > slider_inner_left:
+            filled_x = slider_inner_left + MASTER_VOLUME * (slider_inner_right - slider_inner_left)
+        else:
+            filled_x = slider_inner_left
+
+        pygame.draw.line(
+            surface,
+            (100, 190, 255),
+            (slider_inner_left, track_y),
+            (filled_x, track_y),
+            4,
+        )
+
+        handle_x = filled_x
+        handle_radius = 8
+        pygame.draw.circle(surface, (210, 230, 255), (int(handle_x), track_y), handle_radius)
+        pygame.draw.circle(surface, (0, 0, 0), (int(handle_x), track_y), handle_radius, 1)
+
+        # Label
+        draw_text(
+            surface,
+            "VOLUME",
+            volume_slider_rect.left - 40,
+            volume_slider_rect.centery,
+            FONT_SMALL,
+            WHITE,
+            center=True,
+        )
 
         # Bottom-bar (lite billigare version)
         bottom_height = 42
@@ -1838,7 +1957,8 @@ async def main():
                 big_win_active = False
                 if music_ducked_for_bigwin and ENABLE_MUSIC:
                     try:
-                        pygame.mixer.music.set_volume(MUSIC_BASE_VOLUME)
+                        music_duck_factor = 1.0
+                        update_global_volume()
                     except Exception:
                         pass
                     music_ducked_for_bigwin = False
