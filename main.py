@@ -2808,6 +2808,8 @@ async def main():
         screen.blit(scaled_surface, (offset_x, offset_y))
 
         pygame.display.flip()
+        # VIKTIGT för webben:
+        await asyncio.sleep(0)
 
     pygame.quit()
     #sys.exit()
